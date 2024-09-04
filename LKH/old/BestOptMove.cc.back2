@@ -1,0 +1,659 @@
+#include "LK.h"
+
+namespace myOptimizeName
+{
+  int LKSolver::Excludable(const NodeClass *ta, const NodeClass *tb)
+  {
+    if (ta == tb->OldPred)
+      return !tb->OldPredExcluded;
+    if (ta == tb->OldSuc)
+      return !tb->OldSucExcluded;
+    return 0;
+  }
+  void LKSolver::Exclude(NodeClass *ta, NodeClass *tb)
+  {
+    if (ta == tb->Pred || ta == tb->Suc)
+      return;
+    if (ta == tb->OldPred)
+      tb->OldPredExcluded = 1;
+    else if (ta == tb->OldSuc)
+      tb->OldSucExcluded = 1;
+    if (tb == ta->OldPred)
+      ta->OldPredExcluded = 1;
+    else if (tb == ta->OldSuc)  
+      ta->OldSucExcluded = 1;
+  }
+
+  NodeClass *LKSolver::Best2OptMove(NodeClass *t1, NodeClass *t2, int *G0, int *Gain)
+  {
+    //cout << "best 2opt move" << endl;
+
+    LKDataModel *Data = (LKDataModel*) _myModel->getDataModel();
+    NodeClass *t3=NULL, *t4=NULL, *T3=NULL, *T4=NULL;
+    int G1, G2, BestG2 = INT_MIN;
+
+    if(SUC(t1) != t2)
+      Reversed ^= 1;
+
+    for(size_t i = 0; i < t2->CandidateSet.size(); ++i)
+    {
+      CandidateClass *Nt2 = &t2->CandidateSet[i];
+      t3 = Nt2->To;
+
+      if (t3 == t2->Pred || t3 == t2->Suc || (G1 = *G0 - Nt2->Cost) <= 0 )
+	continue;
+      t4 = PRED(t3);
+      G2 = G1 + Data->C(t3, t4);
+
+      if((*Gain = G2 - Data->C(t4, t1)) > 0)
+      {
+	Swap1(t1, t2, t3);
+	*G0 = G2;
+	return t4;
+      }
+      if(BestG2 > G2 && Swaps < MaxSwaps && 
+	  (G2 - Precision) >= t4->Cost  && Excludable(t3, t4))
+      {
+	T3 = t3;
+	T4 = t4;
+	BestG2 = G2;
+      }
+
+    }
+
+    *Gain = 0;
+    if(T4)
+    {
+      //cout << t1->Id << " " << t2->Id << " " << T3->Id << " " << T4->Id << endl;
+
+      Swap1(t1, t2, T3);
+      Exclude(t1, t2);
+      Exclude(T3, T4);
+      *G0 = BestG2;
+
+      //      cout << t1->Id << " " << t2->Id << " " << T3->Id << " " << T4->Id << endl;
+      //     cout << "move best 2opt " << T3->Id << " " << T4->Id << endl;
+    }
+
+    return T4; 
+  }
+
+  NodeClass *LKSolver::Best3OptMove(NodeClass *t1, NodeClass *t2, int *G0, int *Gain)
+  {
+    LKDataModel *Data = (LKDataModel*) _myModel->getDataModel();
+    NodeClass *t3 = NULL, *t4 = NULL, *T3 = NULL, *T4 = NULL;
+    NodeClass *t5 = NULL, *t6 = NULL, *T5 = NULL, *T6 = NULL;
+    int G1, G2, G3, G4, BestG4 = INT_MIN;
+
+    vector<SegmentClass> segs(3);
+    vector<SwapRecord> BestFlips;
+
+    if(SUC(t1) != t2)
+      Reversed ^= 1;
+
+    for(size_t i = 0; i < t2->CandidateSet.size(); ++i)
+    {
+      CandidateClass *Nt2 = &t2->CandidateSet[i];
+      t3 = Nt2->To;
+
+      G1 = *G0 - Nt2->Cost;
+
+      //if (t3 == t2->Pred || t3 == t2->Suc || (G1 = *G0 - Nt2->Cost) <= 0 )
+      if (t3 == t2->Pred || t3 == t2->Suc || G1 <= 0 )
+	continue;
+
+      for(int X4 = 1; X4 <= 2; ++X4)
+      {
+	t4 = X4 == 1 ? PRED(t3) : SUC(t3);	
+
+	G2 = G1 + Data->C(t3, t4);
+	//move 2opt
+	if(t4 != t1)
+	  *Gain = G2-Data->C(t4,t1);
+	//if(X4 == 1 && (*Gain = G2 - Data->C(t4, t1)) > 0)
+	if(X4 == 1 && *Gain > 0 && t4 != t1)
+	{
+	  Swap1(t1, t2, t3);
+	  *G0 = G2;
+	  return t4;
+	}
+	//X4 = 1 => 12-43
+	//X4 = 2 => 12-34
+	for(size_t j = 0; j < t4->CandidateSet.size(); ++j)
+	{
+	  CandidateClass *Nt4 = &t4->CandidateSet[j];	  
+	  t5 = Nt4->To;
+
+	  G3 = G2 - Nt4->Cost;
+
+	  if(t5 == t4->Pred || t5 == t4->Suc || G3 <= 0
+	      || (X4 == 2 && !BETWEEN(t2, t5, t3)))
+	    continue;
+
+	  for(int X6 = 1; X6 <= 2; ++X6)
+	  {
+	    //t6 = X6 == 1 ? PRED(t5) : SUC(t5);
+	    t6 = X6 == 1 ? SUC(t5) : PRED(t5);
+
+	    vector<SwapRecord> FlipStacks;
+	    bool feasibleFlip = true;
+
+	    for(size_t k = 0; k < segs.size(); ++k)
+	      segs[k].Reversed = 0;
+
+	    if(X4 == 1) 
+	    {
+	      if(BETWEEN(t2, t5, t3))
+	      {
+		//12-56-43-
+		if(X6 == 1)
+		{
+		  segs[0].SetFrom(1); segs[0].SetTo(2);
+		  segs[1].SetFrom(5); segs[1].SetTo(6);
+		  segs[2].SetFrom(4); segs[2].SetTo(3);
+		  feasibleFlip = Flipable(3, segs, FlipStacks);
+		}
+		//12-65-43-
+		else 
+		{
+		  segs[0].SetFrom(1); segs[0].SetTo(2);
+		  segs[1].SetFrom(6); segs[1].SetTo(5);
+		  segs[2].SetFrom(4); segs[2].SetTo(3);
+		  feasibleFlip = Flipable(3, segs, FlipStacks);
+		} 
+	      }
+	      else if(BETWEEN(t4, t5, t1))
+	      {
+		//12-43-56
+		if(X6 == 1)
+		{
+		  segs[0].SetFrom(1); segs[0].SetTo(2);
+		  segs[1].SetFrom(4); segs[1].SetTo(3);
+		  segs[2].SetFrom(5); segs[2].SetTo(6);
+		  feasibleFlip = Flipable(3, segs, FlipStacks);
+		}
+		//12-43-65
+		else 
+		{
+		  segs[0].SetFrom(1); segs[0].SetTo(2);
+		  segs[1].SetFrom(4); segs[1].SetTo(3);
+		  segs[2].SetFrom(6); segs[2].SetTo(5);
+		  feasibleFlip = Flipable(3, segs, FlipStacks);
+		} 
+	      }
+	    }
+	    else if(X4 == 2) 
+	    {
+	      if(BETWEEN(t2, t5, t4))
+	      {
+		//12-56-34-
+		if(X6 == 1)
+		{
+		  segs[0].SetFrom(1); segs[0].SetTo(2);
+		  segs[1].SetFrom(5); segs[1].SetTo(6);
+		  segs[2].SetFrom(3); segs[2].SetTo(4);
+		  feasibleFlip = Flipable(3, segs, FlipStacks);
+		}
+		//12-65-34
+		else 
+		{
+		  segs[0].SetFrom(1); segs[0].SetTo(2);
+		  segs[1].SetFrom(6); segs[1].SetTo(5);
+		  segs[2].SetFrom(3); segs[2].SetTo(4);
+		  feasibleFlip = Flipable(3, segs, FlipStacks);
+		} 
+	      }
+	      else if(BETWEEN(t3, t5, t1))
+	      {
+		//12-34-56
+		if(X6 == 1)
+		{
+		  segs[0].SetFrom(1); segs[0].SetTo(2);
+		  segs[1].SetFrom(3); segs[1].SetTo(4);
+		  segs[2].SetFrom(5); segs[2].SetTo(6);
+		  feasibleFlip = Flipable(3, segs, FlipStacks);
+		}
+		//12-34-65
+		else 
+		{
+		  segs[0].SetFrom(1); segs[0].SetTo(2);
+		  segs[1].SetFrom(3); segs[1].SetTo(4);
+		  segs[2].SetFrom(6); segs[2].SetTo(5);
+		  feasibleFlip = Flipable(3, segs, FlipStacks);
+		} 
+	      }
+	    }
+
+	    if(!feasibleFlip || t6 == t1)
+	      continue;
+
+	    G4 = G3 + Data->C(t5, t6);
+	    if(t6 != t1)
+	      *Gain = G4 - Data->C(t6, t1);
+	    //if((*Gain = G4 - Data->C(t6, t1)>0)  && feasibleFlip)
+	    if(*Gain > 0 && feasibleFlip && t1 != t6)
+	    {
+	      NodeClass *Temp[6] = {t1,t2,t3,t4,t5,t6};
+
+	      for(size_t f = 0; f < FlipStacks.size(); ++f)
+	      {
+		NodeClass *f1, *f2, *f3;
+		f1 = Temp[FlipStacks[f].id1-1];
+		f2 = Temp[FlipStacks[f].id2-1];
+		f3 = Temp[FlipStacks[f].id3-1];
+		Swap1(f1, f2, f3);
+	      }
+
+	      *G0 = G4;
+	      return t6;
+	    }
+
+	    if(G4 > BestG4 && Swaps < MaxSwaps && G4 - Precision >= t6->Cost &&
+		Excludable(t5, t6))
+	    {
+	      T3 = t3;
+	      T4 = t4;
+	      T5 = t5;
+	      T6 = t6;
+	      BestFlips = FlipStacks;
+	      BestG4 = G4;
+	    }
+
+	  }
+	}
+      }
+    }
+
+    *Gain = 0;
+    if(T6)
+    {
+      NodeClass *Temp[6] = {t1,t2,T3,T4,T5,T6};
+      for(size_t f = 0; f < BestFlips.size(); ++f)
+      {
+	NodeClass *f1, *f2, *f3;
+	f1 = Temp[BestFlips[f].id1-1];
+	f2 = Temp[BestFlips[f].id2-1];
+	f3 = Temp[BestFlips[f].id3-1];
+	Swap1(f1, f2, f3);
+      }
+
+      Exclude(t1, t2);
+      Exclude(T3, T4);
+      Exclude(T5, T6);
+      *G0 = BestG4;
+    }
+
+    return T6; 
+  }
+  NodeClass *LKSolver::Best4OptMove(NodeClass *t1, NodeClass *t2, int *G0, int *Gain)
+  {
+    return NULL;  
+  }
+  NodeClass *LKSolver::Best5OptMove(NodeClass *t1, NodeClass *t2, int *G0, int *Gain)
+  {
+    return NULL;  
+  }
+
+  NodeClass *LKSolver::BestKOptMove(NodeClass *t1, NodeClass *t2, int *G0, int *Gain)
+  {
+
+    NodeClass *rval = NULL;
+    vector<NodeClass*> Nodes(2*kopt+1), BestNodes(2*kopt+1);
+    int BestGk = INT_MIN;
+    long int BestFlipKey;
+
+    if(SUC(t1) != t2)
+      Reversed ^= 1;
+
+    SegmentClass *FirstFlipSegment = &FlipSegs[1];
+    FirstFlipSegment->SetPred(FirstFlipSegment);
+    FirstFlipSegment->SetSuc(FirstFlipSegment);
+    FirstFlipSegment->SetFrom(1);
+    FirstFlipSegment->SetTo(2);
+    FirstFlipSegment->NonSequence = false;
+
+    Nodes[1] = t1; Nodes[2] = t2;
+    BestNodes[1] = t1; BestNodes[2] = t2;
+    BestNodes[2*kopt] = NULL;
+
+    //NodeClass *rval = BestKOptMoveR(1, Nodes, BestNodes, FirstFlipSegment, BestFlips, *G0, &BestGk, G0, Gain);
+    rval = BestKOptMoveR(1, Nodes, BestNodes, FirstFlipSegment, 12, &BestFlipKey, *G0, &BestGk, G0, Gain);
+
+    if(rval != NULL)
+      return rval; 
+    *Gain = 0;
+    if(BestNodes[2*kopt])
+    {
+      //MakeOptMove(BestNodes, BestFlips);
+      MakeOptMove(BestNodes, *FlipHash[BestFlipKey].GetFlipStacks());
+      for(int k = 1; k <= kopt; ++k)
+	Exclude(BestNodes[2*k-1], BestNodes[2*k]);
+      *G0 = BestGk;
+      rval = BestNodes[2*kopt];
+    }
+
+    return rval;  
+  }
+
+  NodeClass *LKSolver::BestKOptMoveR(
+      int k, 
+      vector<NodeClass*> &Nodes, vector<NodeClass*> &BestNodes, 
+      SegmentClass *FirstFlipSegment, 
+      //vector<SwapRecord> &BestFlipStacks, 
+      long int ParentKey,
+      long int *BestFlipKey,
+      int Gk, int *BestGk, int *G0, int *Gain, 
+      bool brige, const int klimit)
+  {
+    if(k + 1 > kopt || k + 1 > klimit) 
+      return NULL;
+
+    LKDataModel *Data = (LKDataModel*) _myModel->getDataModel();
+    NodeClass *rval = NULL;
+    int gain_ = 0;
+    const int _2k = 2*k, _2k_1 = 2*k+1, _2k_2 = 2*k + 2;
+    NodeClass *Node2k, *Node2k_1, *Node2k_2;
+    Node2k = Nodes[_2k];
+    SegmentClass *tSeg = &FlipSegs[k+1];
+
+    for(size_t i = 0; i < Node2k->CandidateSet.size(); ++i)
+    {
+      CandidateClass *Nt = &Node2k->CandidateSet[i];
+      Node2k_1 = Nodes[_2k_1] = Nt->To;
+      const int G2k_1 = Gk - Nt->Cost;
+
+      if(Node2k->Pred == Node2k_1 || Node2k->Suc == Node2k_1 || G2k_1 <= 0)
+	continue;
+      //if(find_(Nodes, _2k_1, Node2k_1) && find_(Nodes, _2k, Node2k))
+      //if(find_(Nodes, _2k_1, Node2k_1))
+      //continue;
+
+      if( ( k + 1 >= 3 && Node2k == Nodes[2] && Node2k_1 == Nodes[3]) || 
+	  ( k + 1 >= 3 && Node2k == Nodes[3] && Node2k_1 == Nodes[2]) || 
+	  ( k + 1 >= 4 && Node2k == Nodes[4] && Node2k_1 == Nodes[5]) || 
+	  ( k + 1 >= 4 && Node2k == Nodes[5] && Node2k_1 == Nodes[4]) ||
+	  ( k + 1 >= 5 && Node2k == Nodes[6] && Node2k_1 == Nodes[7]) || 
+	  ( k + 1 >= 5 && Node2k == Nodes[7] && Node2k_1 == Nodes[6]))
+	continue;
+
+      if(Node2k_1 == Nodes[1] && Node2k_1 == Nodes[2])
+	continue;
+
+      // ====
+      tSeg->SetFrom(_2k_2); tSeg->SetTo(_2k_1);
+      tSeg->NonSequence = brige;
+      // ====
+
+      for(int Xk = 1; Xk <= 2; ++Xk)
+      //for(int x = 0; x <= 1; ++x)
+      {
+	//if(!brige && Xks[x] < 0)
+	  //continue;
+
+	//int Xk = Xks[x];
+	//if(brige) Xk = x+1;
+	//int Xk = x + 1;
+	Node2k_2 = Nodes[_2k_2] = Xk == 1 ? PRED(Node2k_1) : SUC(Node2k_1);
+
+	//if(find_(Nodes, _2k_1, Node2k_2) && find_(Nodes, _2k_1, Node2k_1))
+	//if(find_(Nodes, _2k_1, Node2k_2))
+	//continue;
+
+	if(( k + 1 >= 2 && Node2k_2 == Nodes[1] && Node2k_1 == Nodes[2]) || 
+	    ( k + 1 >= 2 && Node2k_2 == Nodes[2] && Node2k_1 == Nodes[1]) || 
+	    ( k + 1 >= 3 && Node2k_2 == Nodes[3] && Node2k_1 == Nodes[4]) || 
+	    ( k + 1 >= 3 && Node2k_2 == Nodes[4] && Node2k_1 == Nodes[3]) || 
+	    ( k + 1 >= 4 && Node2k_2 == Nodes[5] && Node2k_1 == Nodes[6]) || 
+	    ( k + 1 >= 4 && Node2k_2 == Nodes[6] && Node2k_1 == Nodes[5]) ||
+	    ( k + 1 >= 5 && Node2k_2 == Nodes[8] && Node2k_1 == Nodes[7]) || 
+	    ( k + 1 >= 5 && Node2k_2 == Nodes[7] && Node2k_1 == Nodes[8]))
+	  continue;
+
+	if (Node2k_2 == Nodes[1])
+	  continue;
+
+	//if(Node2k_1->SelectCnt > 0 && Node2k_2->SelectCnt > 0)
+	//  continue;
+	Node2k_2->SelectCnt += 1;
+
+	const int G2k = G2k_1 + Data->C(Node2k_1, Node2k_2);
+	tSeg->SetFrom(Xk == 1 ? _2k_2 : _2k_1);
+	tSeg->SetTo(Xk == 1 ? _2k_1 : _2k_2);
+	tSeg->NonSequence = brige;
+
+	//InsertSeg(FirstFlipSegment, tSeg, Nodes);
+	if(!InsertSeg(FirstFlipSegment, tSeg, Nodes, ParentKey))
+	{
+	  continue;
+	}
+
+	//long int LogKey = !brige ? LogKeys[x] : GetFlipLogKey(FirstFlipSegment);
+
+	long int LogKey = GetFlipLogKey(FirstFlipSegment);
+	//long int LogKey = LogKeys[x];
+	bool feasibleFlip = false;
+
+	if(LogKeys[Xk-1] != LogKey)
+	{
+	  check_route(Nodes, 4);
+	  cout << "logkey = " << LogKey << " " << LogKeys[Xk-1] << endl;
+
+	  for(int ii = 1; ii <= 2*kopt; ++ii)
+	  {
+	    if(Nodes[ii] != NULL)
+	      cout << Nodes[ii]->Id << " " << Nodes[ii]->Rank << endl; 
+	  }
+
+	  myGetChar();
+	}
+
+	//if(SearchFlipLogKey(LogKey))
+	{
+	  //FlipStacks = *FlipHash[LogKey].GetFlipStacks();
+	  feasibleFlip = FlipHash[LogKey].IsFeasibleLog();
+	  //feasibleFlip = !brige ? Feasibles[x] : FlipHash[LogKey].IsFeasibleLog();
+	}
+	//else 
+	{
+	  //FlipStacks.clear();
+	  //feasibleFlip = Flipable2(k+1, FirstFlipSegment, FlipStacks);
+	  //InsertFlipLog(LogKey, feasibleFlip, FlipStacks);
+	}
+
+
+	if(brige && !feasibleFlip && Nodes[_2k_2] != Nodes[1] && !(klimit > 2 && k + 1 == 2) )
+	{
+	  gain_ = BrigeMove(Nodes, FirstFlipSegment, LogKey, G2k - Data->C(Nodes[1], Nodes[_2k_2]), k+1);
+	  if(gain_ > 0)
+	  { 
+	    *Gain = gain_;
+	    return NULL;
+	  }
+	}
+
+	if(Node2k_2 != Nodes[1] && feasibleFlip)
+	  gain_ = G2k - Data->C(Node2k_2, Nodes[1]);
+
+	if(feasibleFlip && gain_ > 0 && Nodes[1] != Node2k_2 && !brige)
+	{
+	  //MakeOptMove(Nodes, FlipStacks);
+	  MakeOptMove(Nodes, *FlipHash[LogKey].GetFlipStacks());
+	  *G0 = G2k;
+	  *Gain = gain_;
+	  return Node2k_2;
+	}
+
+	//rval = BestKOptMoveR(k+1, Nodes, BestNodes, FirstFlipSegment, BestFlipStacks, G2k, BestGk, G0, Gain, brige, klimit);
+	if(k + 2 <= kopt)
+	  rval = BestKOptMoveR(k+1, Nodes, BestNodes, FirstFlipSegment, LogKey, BestFlipKey, G2k, BestGk, G0, Gain, brige, klimit);
+
+	if(rval != NULL)
+	  return rval;
+
+	if(k + 1 == kopt && feasibleFlip && Nodes[1] != Node2k_2)
+	{
+	  if(G2k > *BestGk && Swaps < MaxSwaps && G2k - Precision >= Node2k_2->Cost 
+	      && Excludable(Node2k_1, Node2k_2))
+	  {
+	    for(int ii = 1; ii <= 2*kopt; ++ii)
+	      BestNodes[ii] = &Data->NodeSet[Nodes[ii]->Id];
+	    *BestFlipKey = LogKey;
+	    *BestGk = G2k;
+	  }
+	}
+
+	tSeg->GetSuc()->SetPred(tSeg->GetPred());
+	tSeg->GetPred()->SetSuc(tSeg->GetSuc());
+	tSeg->SetSuc(NULL);
+	tSeg->SetPred(NULL);
+
+	//Node2k_1->PreSide = Node2k_2->PreSide = NULL;
+	//PreEdges[P3] = PreEdges[P4] = 0;
+	Node2k_2->SelectCnt -= 1;
+
+	Nodes[_2k_2] = NULL;
+      }
+
+      //PostEdges[P1] = PostEdges[P2] = 0;
+      Node2k_1->SelectCnt -= 1;
+      //Node2k->PostSide  = Node2k_1->PostSide = NULL;
+      Nodes[_2k_1] = NULL;
+    }
+
+    return rval;
+
+  }
+
+  bool LKSolver::find_(vector<NodeClass*> &Nodes, const int until, NodeClass* Node)
+  {
+    for(size_t i = 0; i < until; ++i)
+      if(Nodes[i] != NULL && Nodes[i] == Node)
+	return true;
+    return false; 
+  }
+
+  void LKSolver::MakeOptMove(vector<NodeClass*> &Nodes, vector<SwapRecord> &Flips)
+  {
+    for(size_t f = 0; f < Flips.size(); ++f)
+    {
+      NodeClass *f1 = Nodes[Flips[f].id1], *f2 = Nodes[Flips[f].id2], *f3 = Nodes[Flips[f].id3];
+      Swap1(f1, f2, f3);
+    }  
+  }
+
+  bool LKSolver::InsertSeg(SegmentClass *First, SegmentClass *tSeg, vector<NodeClass*> &Nodes, long int ParentKey, bool brige)
+  {
+    if(ParentKey == 0)
+    {
+      SegmentClass *Seg = First;
+      do
+      {
+	SegmentClass *tmp1;
+	NodeClass *t1 = Nodes[Seg->GetTo()], *t2 = Nodes[tSeg->GetFrom()], *t3 = Nodes[Seg->GetSuc()->GetFrom()];
+	if(BETWEEN(t1, t2, t3))
+	{
+	  tmp1 = Seg->GetSuc();
+
+	  Seg->SetSuc(tSeg);
+	  tSeg->SetSuc(tmp1);
+
+	  tmp1->SetPred(tSeg);
+	  tSeg->SetPred(Seg);
+
+	  return true;
+	}
+      }
+      while((Seg = Seg->GetSuc()) != First);
+    }
+    else 
+    {
+      FlipLogClass *Pnt = !brige ? &FlipHash[ParentKey] : &BrigeHash[ParentKey];
+
+      const int X = tSeg->GetFrom() < tSeg->GetTo() ? 0 : 1;
+      vector<NextFlipClass> *CandidateBtws = Pnt->GetNextBetweens(X);
+
+      for(size_t i = 0; i < CandidateBtws->size(); ++i)
+      {
+	NextFlipClass *CndBtw = &CandidateBtws->at(i);
+
+	int From = CndBtw->GetFrom(), To = CndBtw->GetTo();
+	int K1 = (From+1) / 2, K2 = (To+1) / 2;
+
+	SegmentClass *Seg1 = &FlipSegs[K1], *Seg2 = &FlipSegs[K2];
+	NodeClass *t1 = Nodes[From], *t2 = Nodes[tSeg->GetFrom()], *t3 = Nodes[To];
+
+	if(BETWEEN(t1, t2, t3))
+	{
+	  SegmentClass *tmp1 = Seg1->GetSuc();
+
+	  Seg1->SetSuc(tSeg);
+	  tSeg->SetSuc(tmp1);
+
+	  tmp1->SetPred(tSeg);
+	  tSeg->SetPred(Seg1);
+
+	  return true;
+	}
+      }
+    }
+
+    return false;
+  }
+
+  void LKSolver::InsertFlipLog(const long int Logkey, const bool feasible, vector<SwapRecord> &Flips)
+  { 
+    if(FlipHash.find(Logkey) != FlipHash.end()) cout << "warning: " << Logkey << endl;
+    FlipHash[Logkey] = FlipLogClass(Logkey, feasible, Flips); 
+  }
+  void LKSolver::InsertBrigeFlipLog(const long int Logkey, const bool feasible, vector<SwapRecord> &Flips)
+  {
+    if(BrigeHash.find(Logkey) != BrigeHash.end()) cout << "warning2: " << Logkey << endl;
+    BrigeHash[Logkey] = FlipLogClass(Logkey, feasible, Flips); 
+  }
+
+  bool LKSolver::SearchFlipLogKey(long int hashkey)
+  { return FlipHash.find(hashkey) != FlipHash.end(); }
+
+  long int LKSolver::GetFlipLogKey(SegmentClass *FirstSegment)
+  {
+    long int key = 0;
+    SegmentClass *Seg = FirstSegment;
+    bool nonSequence = false;
+
+    do
+    {
+      key = 10 * key + Seg->GetFrom();
+      key = 10 * key + Seg->GetTo();
+
+      if(Seg->NonSequence)
+	nonSequence = true;
+    }
+    while((Seg = Seg->GetSuc()) != FirstSegment);
+
+    if(nonSequence) 
+      key *= -1;
+
+    return key;
+  }
+
+  void LKSolver::SetSides(NodeClass *t1, NodeClass *t2, const SetSideMethodParam method)
+  {
+    switch(method)
+    {
+      case pre:
+	t1->PreSide = t2;
+	t2->PreSide = t1;
+	break;
+      case post:
+	t1->PreSide = t2;
+	t2->PostSide = t1;
+	break;
+      case reset:
+	break;
+    }
+
+    return;
+  }
+
+
+};

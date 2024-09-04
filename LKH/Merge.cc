@@ -1,0 +1,585 @@
+#include "LK.h"
+
+namespace myOptimizeName
+{
+  vector<NodeClass *> vec;
+  long int LKSolver::MergeWithTour()
+  {
+    //return MergeWithTourIPT();
+    return MergeWithTourEAX();
+  }
+  long int LKSolver::MergeWithTourIPT()
+  {
+    int Rank = 0, Improved1 = 0, Improved2 = 0;
+    int SubSize1, SubSize2, MaxSubSize1, NewDimension = 0, Forward;
+    int MinSubSize, BestMinSubSize = 3, MinForward = 0;
+    long int Cost1 = 0, Cost2 = 0, Gain, OldCost1, MinGain = 0;
+    NodeClass *N, *NNext, *N1, *N2, *MinN1, *MinN2, *First = 0, *Last;
+
+    LKDataModel *Data = (LKDataModel*) _myModel->getDataModel();
+    N = Data->FirstNode;
+    do
+      N->Suc->Pred = N->Next->Prev = N;
+    while ((N = N->Suc) != Data->FirstNode);
+    do {
+      Cost1 += N->Cost = Data->C(N, N->Suc) - N->Pi - N->Suc->Pi;
+      if ((N->Suc == N->Prev || N->Suc == N->Next) &&
+	  (N->Pred == N->Prev || N->Pred == N->Next))
+	N->V = 0;
+      else {
+	N->V = 1;
+	NewDimension++;
+	First = N;
+      }
+    } while ((N = N->Suc) != Data->FirstNode);
+    if (NewDimension == 0)
+      return Cost1 / Precision;
+
+    do {
+      Cost2 += N->NextCost = N->Next == N->Pred ? N->Pred->Cost :
+	N->Next == N->Suc ? N->Cost :
+	Data->C(N, N->Next) - N->Pi - N->Next->Pi;
+    } while ((N = N->Next) != Data->FirstNode);
+    OldCost1 = Cost1;
+
+    /* Shrink the tours. 
+       OldPred and OldSuc represent the shrunken T1. 
+       Prev and Next represent the shrunken T2 */
+    N = First;
+    Last = 0;
+    do {
+      if (N->V) {
+	N->Rank = ++Rank;
+	if (Last) {
+	  (Last->OldSuc = N)->OldPred = Last;
+	  if (Last != N->Pred)
+	    Last->Cost = 0;
+	}
+	Last = N;
+      }
+    } while ((N = N->Suc) != First);
+    (Last->OldSuc = First)->OldPred = Last;
+    if (Last != First->Pred)
+      Last->Cost = 0;
+    N = First;
+    Last = 0;
+    do {
+      if (N->V) {
+	if (Last) {
+	  Last->Next = N;
+	  if (Last != N->Prev) {
+	    N->Prev = Last;
+	    Last->NextCost = 0;
+	  }
+	}
+	Last = N;
+      }
+    } while ((N = N->Next) != First);
+    Last->Next = First;
+    if (Last != First->Prev) {
+      First->Prev = Last;
+      Last->NextCost = 0;
+    }
+    /* Merge the shrunken tours */
+    do {
+      MinN1 = MinN2 = 0;
+      MinSubSize = NewDimension / 2;
+      N1 = First;
+      do {
+	while (N1->OldSuc != First &&
+	    (N1->OldSuc == N1->Next || N1->OldSuc == N1->Prev))
+	  N1 = N1->OldSuc;
+	if (N1->OldSuc == First &&
+	    (N1->OldSuc == N1->Next || N1->OldSuc == N1->Prev))
+	  break;
+	for (Forward = 1, N2 = N1->Next; Forward >= 0;
+	    Forward--, N2 = N1->Prev) {
+	  if (N2 == N1->OldSuc || N2 == N1->OldPred)
+	    continue;
+	  SubSize2 = MaxSubSize1 = 0;
+	  do {
+	    if (++SubSize2 >= MinSubSize)
+	      break;
+	    if ((SubSize1 = N2->Rank - N1->Rank) < 0)
+	      SubSize1 += NewDimension;
+	    if (SubSize1 >= MinSubSize)
+	      break;
+	    if (SubSize1 > MaxSubSize1) {
+	      if (SubSize1 == SubSize2) {
+		for (N = N1, Gain = 0; N != N2; N = N->OldSuc)
+		  Gain += N->Cost - N->NextCost;
+		if (!Forward)
+		  Gain += N1->NextCost - N2->NextCost;
+		if (Gain != 0) {
+		  MinSubSize = SubSize1;
+		  MinN1 = N1;
+		  MinN2 = N2;
+		  MinGain = Gain;
+		  MinForward = Forward;
+		}
+		break;
+	      }
+	      MaxSubSize1 = SubSize1;
+	    }
+	  } while ((N2 = Forward ? N2->Next : N2->Prev) != N1);
+	}
+      } while ((N1 = N1->OldSuc) != First &&
+	  MinSubSize != BestMinSubSize);
+      if (MinN1) {
+	BestMinSubSize = MinSubSize;
+	if (MinGain > 0) {
+	  Improved1 = 1;
+	  Cost1 -= MinGain;
+	  Rank = MinN1->Rank;
+	  for (N = MinN1; N != MinN2; N = NNext) {
+	    NNext = MinForward ? N->Next : N->Prev;
+	    (N->OldSuc = NNext)->OldPred = N;
+	    N->Rank = Rank;
+	    N->Cost = MinForward ? N->NextCost : NNext->NextCost;
+	    if (++Rank > NewDimension)
+	      Rank = 1;
+	  }
+	} else {
+	  Improved2 = 1;
+	  Cost2 += MinGain;
+	  for (N = MinN1; N != MinN2; N = N->OldSuc) {
+	    if (MinForward) {
+	      (N->Next = N->OldSuc)->Prev = N;
+	      N->NextCost = N->Cost;
+	    } else {
+	      (N->Prev = N->OldSuc)->Next = N;
+	      N->Prev->NextCost = N->Cost;
+	    }
+	  }
+	  if (MinForward)
+	    MinN2->Prev = N->OldPred;
+	  else {
+	    MinN2->Next = N->OldPred;
+	    MinN2->NextCost = N->OldPred->Cost;
+	  }
+	}
+	First = MinForward ? MinN2 : MinN1;
+      }
+    } while (MinN1);
+
+    if (Cost1 < Cost2 ? !Improved1 : Cost2 < Cost1 ? !Improved2 :
+	!Improved1 || !Improved2)
+      return OldCost1 / Precision;
+
+    /* Expand the best tour into a full tour */
+    N = Data->FirstNode;
+    do
+      N->Mark = 0;
+    while ((N = N->Suc) != Data->FirstNode);
+    N = First;
+    N->Mark = N;
+    do {
+      if (!N->Suc->Mark && (!N->V || !N->Suc->V))
+	N->OldSuc = N->Suc;
+      else if (!N->Pred->Mark && (!N->V || !N->Pred->V))
+	N->OldSuc = N->Pred;
+      else if (Cost1 <= Cost2) {
+	if (N->OldSuc->Mark)
+	  N->OldSuc = !N->OldPred->Mark ? N->OldPred : First;
+      } else if (!N->Next->Mark)
+	N->OldSuc = N->Next;
+      else if (!N->Prev->Mark)
+	N->OldSuc = N->Prev;
+      else
+	N->OldSuc = First;
+      N->Mark = N;
+    } while ((N = N->OldSuc) != First);
+    do 
+      N->OldSuc->Pred = N;
+    while ((N = N->Suc = N->OldSuc) != First);
+
+    cout << "IPT: " <<  ((Cost1 <= Cost2 ? Cost1 : Cost2) / Precision) << endl;
+    return (Cost1 <= Cost2 ? Cost1 : Cost2) / Precision;
+  }
+
+  long int LKSolver::MergeWithTourEAX()
+  {
+
+    //int Rank = 0, Improved1 = 0, Improved2 = 0;
+    //int SubSize1, SubSize2, MaxSubSize1, NewDimension = 0, Forward;
+    //int MinSubSize, BestMinSubSize = 3, MinForward = 0;
+    long int Cost1 = 0, Cost2 = 0, Gain, OldCost1 = 0;
+    NodeClass *N, *NNext, *SubN = 0, *FirstNode = 0;
+
+    LKDataModel *Data = (LKDataModel*) _myModel->getDataModel();
+    N = Data->FirstNode;
+    do
+    {
+      N->NodeA = N->NodeB = N->NextSub = NULL;
+      N->Suc->Pred = N->Next->Prev = N;
+      N->V = 0;
+    }
+    while ((N = N->Suc) != Data->FirstNode);
+
+    do 
+      Cost1 += N->Cost = Data->C(N, N->Suc) - N->Pi - N->Suc->Pi;
+    while ((N = N->Suc) != Data->FirstNode);
+
+    do {
+      Cost2 += N->NextCost = N->Next == N->Pred ? N->Pred->Cost :
+	N->Next == N->Suc ? N->Cost :
+	Data->C(N, N->Next) - N->Pi - N->Next->Pi;
+    } while ((N = N->Next) != Data->FirstNode);
+
+    if(Cost1 == Cost2)
+      return Cost2 / Precision;
+
+    FirstNode = Data->FirstNode;
+    int Bit, SubSize;
+
+    NNext = N = Data->FirstNode;
+    
+    /*
+    do
+    {
+      cout << N->Id << " " << NNext->Id << endl;
+      N = N->Suc;
+      NNext = NNext->Next; 
+    }
+    while(N != Data->FirstNode);
+    cout << endl;
+    myGetChar();
+    */
+    int Cycle = 0;
+
+    N = Data->FirstNode;
+
+    do 
+    {
+      Cycle = CycleSearch(N, N, NULL, 0, 0); 
+    }
+    while(Cycle == 0 && ((N = N->Suc) != Data->FirstNode));
+
+    if(Cycle == 0)
+      return Cost1 / Precision;
+
+    NodeClass *NN = N;
+    Bit = 1;
+
+    /*
+    do
+    {
+     if(NN->V) cout << NN->Id << endl; 
+    }while((NN = NN->Suc) != N);
+    myGetChar();
+    */
+
+    /*
+    cout << vec.size() << endl;
+    for(int i = 0; i < vec.size(); ++i)
+    {
+      cout << vec[i]->Id << " " << (vec[i]->NodeA != NULL ? vec[i]->NodeA->Id : -1)
+	<< " " << (vec[i]->NodeB != NULL ? vec[i]->NodeB->Id : -1 ) << endl;
+    }
+
+     */ 
+    /*
+    do
+    {
+      cout << NN->Id << " " << (NN->NodeA != NULL ? NN->NodeA->Id : -1)
+	<< " " << (NN->NodeB != NULL ? NN->NodeB->Id : -1 ) << endl;
+      Bit ^= 1; 
+    }
+    while((NN = Bit ? NN->NodeA : NN->NodeB) != N);
+
+    cout << "done" << endl;
+    myGetChar();
+    */
+    /*
+    do
+    {
+      N = Data->FirstNode;
+
+      do
+	N->NodeA = N->NodeB = NULL;
+      while((N = N->Suc) != Data->FirstNode);
+
+      N = FirstNode;
+      Bit = 0, SubSize = 0;
+
+      int c1 = 0, c2 = 0;
+      //cout << endl;
+
+      do
+      {
+	Bit ^= 1;
+	if(Bit) c1 += 1;
+	else c2 += 1;
+	
+	//cout << "AB = " << N->Id << endl;
+	N->NodeA = Bit ? N->Pred : N->Suc;
+	N->NodeB = Bit ? N->Next : N->Prev;  
+	SubSize++;
+      }while((N = Bit ? N->Next : N->Suc) != FirstNode);
+
+      FirstNode = FirstNode->Suc;
+
+      if(c1 != c2)
+      {
+        SubSize = 0;	
+	continue;
+      }
+
+      //cout << "cnt = " << c1 << " " << c2 << endl;
+
+    } while(SubSize <= 2);
+    cout << SubSize << endl;
+    myGetChar();
+    */
+    
+    N = Data->FirstNode;
+    do
+      N->V = 0;
+    while((N = N->Suc) != Data->FirstNode);
+
+    FirstNode = SubN = Data->FirstNode;
+    do
+    {
+      N = FirstNode = SubN;
+      SubN = NULL;
+      //cout << "NodeId = " << N->Id << endl;
+      Bit = 0;
+      do
+      {
+	N->V = 1;
+	N->SubRoot = FirstNode;
+	//cout << "  SubId = " << N->Id << " " << N->SubRoot->Id << endl;
+
+	NNext = Bit ? N->Pred : N->Suc;
+	if(N->NodeA == NNext)
+	{
+	  //if(SubN == NULL && !N->Suc->V) 
+	    //SubN = N->Suc;
+	  //cout << "hoge" << endl;
+	  if(N->OldPred != N->NodeB)
+	  {
+	    NNext = N->NodeB;
+	  }
+	  else 
+	  {
+	    Bit ^= 1;
+	    NNext = Bit ? N->Pred : N->Suc;
+	  }
+	}
+
+	N->OldSuc = NNext;
+	NNext->OldPred = N;
+      } while((N = NNext) != FirstNode);
+
+      N = FirstNode;
+      do
+      {
+	if(!N->V)
+	{
+	  SubN = N;
+	  break;
+	}
+      }
+      while((N=N->Suc) != FirstNode);
+      
+      FirstNode->NextSub = SubN; 
+    } while(SubN != NULL);
+
+    SubN = Data->FirstNode;
+    int c = 0;
+    long Cost = 0;
+    SubSize = 0;
+
+    do
+    {
+      N = SubN;
+      do
+	Cost += Data->C(N, N->OldSuc) - N->Pi - N->OldSuc->Pi;
+      while((N = N->OldSuc) != SubN);
+      SubN = SubN->NextSub;
+      ++SubSize;
+    }while(SubN != NULL);
+
+    cout << "SubSize " << SubSize << endl;
+
+    N = Data->FirstNode;
+    do 
+    {
+      N->V = 0;
+      N->Mark = NULL;
+    }
+    while((N = N->Suc) != Data->FirstNode);
+    cout << "done initialize " << endl;
+
+    SubN = Data->FirstNode;
+    do
+    {
+      for(int forward = 1; forward >= 0; --forward)
+      {
+	NodeClass *t1 = N, *t2 = forward ? N->OldSuc : N->OldPred; 
+	long int G = Data->C(t1, t2), Gain = 0; 
+
+	cout << t1->Id << " " << t2->Id << endl;
+
+	t1->V = t2->V = 1;
+	SubN->Mark = SubN;
+
+	NodeClass *Nk = MergeWithTourEAX_R(SubN, t1, t2, G, &Gain, SubSize - 1);
+
+	if(Gain > 0)
+	{
+	  cout << "gain = " << Gain << endl;
+	  cout << "Nid = " << t1->Id << " " << t2->Id << " " << Nk->Id << endl;
+
+	  if(forward)
+	  {
+	    NodeClass *NN = t1, *NNext;
+	    do
+	    {
+	      cout << NN->Id << endl;
+	      NNext = NN->OldSuc;
+	      NN->OldSuc = NN->OldPred;
+	      NN->OldPred = NNext;
+	    } while((NN = NNext) != t2);
+	  }
+
+	  t2->OldSuc = Nk;
+	  myGetChar();
+	  goto CLEANUP;
+	}
+
+	SubN->Mark = NULL;
+	t1->V = t2->V = 0;
+
+      }
+    }while(( N = N->OldSuc) != Data->FirstNode);
+
+CLEANUP:
+    cout << "here" << endl;
+
+    N = Data->FirstNode;
+
+    Cost1 = 0;
+    int Count = 0;
+    do 
+    {
+      Count += 1; 
+      Cost1 += N->Cost = Data->C(N, N->Suc) - N->Pi - N->Suc->Pi;
+    }
+    while ((N = N->OldSuc) != Data->FirstNode);
+
+    cout << Cost1 << " " << Count << endl;
+    cout << "sucess " << endl;
+    myGetChar();
+
+    return 0;
+  }
+
+  NodeClass *LKSolver::MergeWithTourEAX_R(NodeClass *First, NodeClass *t1, NodeClass *tk, long G, long *Gain, int Size)
+  {
+    NodeClass *SubN = First, *N;
+    LKDataModel *Data = (LKDataModel*) _myModel->getDataModel();
+
+    if(Size == 0)
+    {
+      *Gain = G - Data->C(t1, tk);
+      cout << *Gain << endl;
+     
+      if(*Gain > 0)
+	return t1;
+      else 
+	return NULL;
+    }
+
+    for(size_t i = 0; i < tk->CandidateSet.size(); ++i)
+    {
+      CandidateClass *Nt = &tk->CandidateSet[i];
+      if(Nt->To->SubRoot->Mark) 
+	continue;
+
+      for(int forward = 1; forward >= 0; --forward)
+      {
+        NodeClass *tk_1 = Nt->To, *tk_2 = forward ? tk_1->OldSuc : tk_1->OldPred;
+	long int G2k = G + Data->C(tk_1, tk_2) - Data->C(tk, tk_1);
+
+	if(G2k < 0 || tk_1->V || tk_2->V)
+	  continue;
+
+	tk_1->V = tk_2->V = 1;
+	tk_1->SubRoot->Mark = tk_1;
+
+	N = MergeWithTourEAX_R(First, t1, tk_2, G2k, Gain, Size - 1);
+
+	if(*Gain > 0)
+	{
+	  if(forward)
+	  {
+	    NodeClass *NN = tk_1, *NNext;
+	    do
+	    {
+	      NNext = NN->OldSuc;
+	      NN->OldSuc = NN->OldPred;
+	      NN->OldPred = NNext;
+	    } while((NN = NNext) != tk_2);
+	  }
+
+	  tk_2->OldSuc = N;
+	  return tk_1;
+	}
+
+	tk_1->SubRoot->Mark = NULL;
+	tk_1->V = tk_2->V = 0;
+      }
+    }
+
+    return NULL;
+  }
+
+  int LKSolver::CycleSearch(NodeClass *N, NodeClass *First, NodeClass *Last, int Bit, int Count)
+  {
+    int rval = 0;
+
+    if(Last != NULL)
+    {
+      Count += (Bit ? -1 : 1);
+      (!Bit ? Last->NodeA : Last->NodeB) = N;
+      (!Bit ? N->NodeA : N->NodeB) = Last;
+
+      if(First == N && Count == 0)
+	return 1;
+    }
+
+    vec.push_back(N);
+
+    NodeClass* Ns[2] = { Bit ? N->Pred : N->Prev, Bit ? N->Suc : N->Next };
+    N->V = 1;
+
+    for(int i = 0; i < 2; ++i)
+    {
+      if(Ns[i] == Last)
+	continue;
+      if(Ns[i] != First && Ns[i]->V >= 1)
+	continue;
+      if(First == Ns[i] && abs(Count) != 1)
+	continue;
+      if(CycleSearch(Ns[i], First, N, Bit^1, Count))
+	return 1;
+    
+    }
+
+    if(Last != NULL)
+    {
+      Count += (Bit ? 1 : -1);
+      (!Bit ? Last->NodeA : Last->NodeB) = NULL;
+      (!Bit ? N->NodeA : N->NodeB) = NULL;
+    }
+    N->V = 0;
+
+    vec.pop_back();
+
+    return rval;
+  }
+
+
+
+};

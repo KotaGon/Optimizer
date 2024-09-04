@@ -1,0 +1,32 @@
+CXX	= g++ 
+CXXOBJS = Main.o SAopt.o 
+
+INCL	= Makefile
+CXXINCL = SA.h utils.h node.h model.h
+CXXFLAGS = -O3 -Wall -g -m64 -std=c++14
+
+DEST	= /usr/local/bin
+LIBS	= -L/usr/lib 
+LIBS	+= -lm  
+
+DEPS = $(patsubst %,$(IDIR)/%,$(CXXINCL))
+
+ODIR = OBJS
+OBJECTS = $(patsubst %, $(ODIR)/%, $(CXXOBJS))
+
+EXE	= SA
+
+$(ODIR)/%.o: %.cc $(DEPS)
+	$(CXX) -c -o $@ $< $(CXXFLAGS)
+
+.PHONY:
+	all clean
+
+all:
+	$(MAKE) $(EXE)
+
+$(EXE): $(OBJECTS) $(DEPS)
+	  $(CXX) -o $(EXE) $(OBJECTS) $(CXXFLAGS)
+
+clean:	
+	rm -f *.o *.gnu ${CXXOBJS} ${EXE}

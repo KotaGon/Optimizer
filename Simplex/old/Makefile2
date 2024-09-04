@@ -1,0 +1,34 @@
+CXX	= g++
+SRC	= main.cc simplex.cc
+OBJ = ./obj
+#CXXOBJS = $(OBJ)/main.o $(OBJ)/simplex.o
+CXXOBJS = main.o simplex.o
+
+INCL	= Makefile
+CXXINCL = simplex.h timer.h graph.h
+CXXFLAGS = -std=c++14 -O3 -Wall 
+
+DEST	= /usr/local/bin
+LIBS	= -L/usr/lib 
+LIBS	+= 
+
+EXE	= Optimize 
+
+SRC  = $(wildcard *.cc)
+OBJECTS  = $(addprefix $(OBJ)/, $(SRC:.cc=.o))
+
+#$(EXE): $(CXXOBJS)
+#$(CXX) $(CXXFLAGS) $(CXXOBJS) $(LIBS) -o $(EXE) 
+$(EXE): $(OBJECTS)
+	$(CXX) -o $@ $^ $(LIBS)
+
+#$(CXXOBJS): $(CXXINCL)
+$(OBJ)/%.o: %.cc
+	@[ -d $(OBJ) ]
+	$(CXX) $(CXXFLAGS) $(LIBS) -o $@ -c $<
+
+#CXXOBJS: $(INCL) $(CXXINCL)
+#CXXOBJS: $(CXXINCL)
+
+clean:	
+	rm -f *.o *.gnu $(OBJECTS) $(EXE)

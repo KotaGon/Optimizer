@@ -1,0 +1,20 @@
+CXX	= g++ -std=c++14
+CXXOBJS = Main.o LKopt.o ReadProblem.o CreateCandidateSet.o Record.o LinKernighan.o BestOptMove.o Flip.o test.o Between.o Bridge.o
+
+INCL	= Makefile
+CXXINCL = LK.h utils.h node.h flip.h model.h
+CXXFLAGS = -O3 -Wall -g -m64
+
+DEST	= /usr/local/bin
+LIBS	= -L/usr/lib 
+LIBS	+= -lm  
+
+EXE	= LKH 
+
+EXE: ${CXXOBJS}
+	${CXX} ${CXXFLAGS} ${CXXOBJS} ${LIBS} -o ${EXE} 
+
+CXXOBJS: ${INCL} ${CXXINCL}
+
+clean:	
+	rm -f *.o *.gnu ${CXXOBJS} ${EXE}

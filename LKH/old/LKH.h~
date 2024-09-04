@@ -1,0 +1,17 @@
+#ifndef _LK_H
+#define _LK_H
+#include "node.h"
+
+namespace myOptimizeName
+{
+  class LKSolver
+  {
+    private:
+
+    public:
+
+  };
+
+};
+
+#endif
